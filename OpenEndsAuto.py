@@ -442,8 +442,8 @@ if (st.session_state.verbatims is not None and
                 st.metric("Total Responses", len(responses))
             with col2:
                 st.metric("Unique Responses", len(set(responses)))
-            with col3:
-                st.metric("Average Length", f"{np.mean([len(r) for r in responses]):.1f} chars")
+            # with col3:
+            #     st.metric("Average Length", f"{np.mean([len(r) for r in responses]):.1f} chars")
             
             st.markdown("### 📋 Response Preview")
             st.dataframe(pd.DataFrame(responses, columns=["Responses"]).head(10), 
