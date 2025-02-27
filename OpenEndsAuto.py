@@ -643,10 +643,10 @@ if (st.session_state.verbatims is not None and
                     df_pie,
                     names='Code Name',
                     values='Count',
-                    hole=0.4,
+                    hole=0.2,
                     title="Code Distribution",
                     labels={'Count': 'Responses'},
-                    width=1200,  # Increased width
+                    width=1000,  # Increased width
                     height=800   # Increased height
                 )
 
@@ -654,7 +654,7 @@ if (st.session_state.verbatims is not None and
                 fig.update_layout(
                     uniformtext_minsize=12,  # Minimum font size
                     uniformtext_mode='hide',  # Hide labels that don't fit
-                    margin=dict(t=50, b=20, l=20, r=20),
+                    margin=dict(t=50, b=50, l=20, r=20),
                     legend=dict(
                         orientation="h",
                         yanchor="bottom",
