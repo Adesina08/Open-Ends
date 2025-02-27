@@ -423,15 +423,15 @@ with st.container():
     else:
         st.info("ℹ️ Upload a file to begin analysis", icon="📤")
 
+# ---------------------------
 # Main Analysis Dashboard
+# ---------------------------
 if (st.session_state.verbatims is not None and 
     not st.session_state.verbatims.empty and 
     selected_question and 
     selected_question in question_dict):
     
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🔍 Auto-Coding", "📦 Results", "📚 Exports"])
-    
-    # Rest of the tab code remains the same...
     
     with tab1:  # Overview Tab
         with st.container():
@@ -460,8 +460,6 @@ if (st.session_state.verbatims is not None and
     with tab2:  # Coding Tab
         with st.container():
             st.markdown("### 🛠 Coding Tools")
-            
-            # Codeframe Generation
             with st.expander("🧠 Automatic Codeframe Generation", expanded=True):
                 st.markdown("**AI-powered codeframe creation**")
                 if st.button("🚀 Generate Codeframe", key="gen_codeframe"):
@@ -488,7 +486,6 @@ if (st.session_state.verbatims is not None and
                         st.success("✅ Codeframe generated!")
                         display_codeframe(codeframe)
             
-            # Code Assignment
             with st.expander("🔖 Assign Codes to Responses", expanded=True):
                 st.markdown("**Automated coding using generated codeframe**")
                 if st.button("📝 Start Coding", key="assign_codes"):
@@ -506,7 +503,6 @@ if (st.session_state.verbatims is not None and
                         st.success(f"✅ Coded {len(df_coded)} responses!")
                         st.dataframe(df_coded.head(100))
             
-            # Topic Modeling
             with st.expander("🧩 Topic Modeling", expanded=True):
                 st.markdown("**Discover latent themes in responses**")
                 if st.button("🌌 Run Topic Analysis", key="topic_model"):
@@ -523,27 +519,19 @@ if (st.session_state.verbatims is not None and
         with st.container():
             st.markdown("### 📋 Coding Results")
             if selected_question in st.session_state.coded_data:
-                df_coded = st.session_state.coded_data[selected_question].copy()  # Make a copy
-            
-            # Clean error codes - ADD THIS SECTION
-            df_coded['codes'] = df_coded['codes'].apply(
-                lambda x: [c for c in x if isinstance(c, (int, float))]
-            )
-            
-            # Response Distribution Chart
-            st.markdown("#### Code Distribution")
-            code_counts = pd.Series([item for sublist in df_coded['codes'] for item in sublist]).value_counts()
-            fig = px.pie(code_counts, 
-                        names=code_counts.index, 
-                        values=code_counts.values,
-                        hole=0.4)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Coded Responses Table
-            st.markdown("#### Coded Responses Preview")
-            st.dataframe(df_coded.head(100), 
-                       use_container_width=True,
-                       height=600)
+                df_coded = st.session_state.coded_data[selected_question].copy()
+                df_coded['codes'] = df_coded['codes'].apply(
+                    lambda x: [c for c in x if isinstance(c, (int, float))]
+                )
+                st.markdown("#### Code Distribution")
+                code_counts = pd.Series([item for sublist in df_coded['codes'] for item in sublist]).value_counts()
+                fig = px.pie(code_counts, 
+                            names=code_counts.index, 
+                            values=code_counts.values,
+                            hole=0.4)
+                st.plotly_chart(fig, use_container_width=True)
+                st.markdown("#### Coded Responses Preview")
+                st.dataframe(df_coded.head(100), use_container_width=True, height=600)
 
     with tab4:  # Exports Tab
         with st.container():
@@ -612,8 +600,10 @@ if (st.session_state.verbatims is not None and
                             file_name=output_filename,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
+else:
+    st.empty()
 
 # Footer
 st.markdown("---")
-st.markdown(f"<div style='text-align: center; color: #666;'>© {datetime.datetime.now().year} Survey Analysis Studio</div>", 
-            unsafe_allow_html=True)
+current_year = datetime.datetime.now().year
+st.markdown(f"<div style='text-align: center; color: #666;'>© {current_year} Survey Open-ended Coding Automation Tool</div>", unsafe_allow_html=True)
