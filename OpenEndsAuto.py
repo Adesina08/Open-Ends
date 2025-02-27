@@ -719,120 +719,120 @@ if (st.session_state.verbatims is not None and
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
             
-# In the Exports Tab section under Full Dataset Export
-with col2:
-    st.markdown("#### Full Dataset Export")
-    if selected_question in st.session_state.coded_data:
-        try:
-            # Get original data with ALL columns
-            original_verbatims = st.session_state.verbatims.copy()
-            coded_data = st.session_state.coded_data[selected_question].copy()
-            
-            # Create temporary index for safe merging
-            original_verbatims = original_verbatims.reset_index(drop=True)
-            coded_data = coded_data.reset_index(drop=True)
+            # In the Exports Tab section under Full Dataset Export
+            with col2:
+                st.markdown("#### Full Dataset Export")
+                if selected_question in st.session_state.coded_data:
+                    try:
+                        # Get original data with ALL columns
+                        original_verbatims = st.session_state.verbatims.copy()
+                        coded_data = st.session_state.coded_data[selected_question].copy()
+                        
+                        # Create temporary index for safe merging
+                        original_verbatims = original_verbatims.reset_index(drop=True)
+                        coded_data = coded_data.reset_index(drop=True)
 
-            # Merge coding results while preserving all original columns
-            merged_data = pd.concat([
-                original_verbatims,
-                coded_data[['codes', 'confidence', 'reasoning']]
-            ], axis=1)
+                        # Merge coding results while preserving all original columns
+                        merged_data = pd.concat([
+                            original_verbatims,
+                            coded_data[['codes', 'confidence', 'reasoning']]
+                        ], axis=1)
 
-            # Add individual code columns using vectorized operations
-            codes_expanded = coded_data['codes'].apply(
-                lambda x: pd.Series(
-                    [str(c) for c in x[:5]] + ['']*(5-len(x[:5])),
-                    index=[f'Code{i+1}' for i in range(5)]
-                )
-            )
-            
-            # Final export with all original columns + coding results
-            final_export = pd.concat([
-                merged_data,
-                codes_expanded
-            ], axis=1)
+                        # Add individual code columns using vectorized operations
+                        codes_expanded = coded_data['codes'].apply(
+                            lambda x: pd.Series(
+                                [str(c) for c in x[:5]] + ['']*(5-len(x[:5])),
+                                index=[f'Code{i+1}' for i in range(5)]
+                            )
+                        )
+                        
+                        # Final export with all original columns + coding results
+                        final_export = pd.concat([
+                            merged_data,
+                            codes_expanded
+                        ], axis=1)
 
-            # Preserve original column order + new coding columns
-            original_columns = list(st.session_state.verbatims.columns)
-            new_columns = ['codes', 'confidence', 'reasoning'] + list(codes_expanded.columns)
-            column_order = original_columns + new_columns
-            
-            final_export = final_export[column_order]
+                        # Preserve original column order + new coding columns
+                        original_columns = list(st.session_state.verbatims.columns)
+                        new_columns = ['codes', 'confidence', 'reasoning'] + list(codes_expanded.columns)
+                        column_order = original_columns + new_columns
+                        
+                        final_export = final_export[column_order]
 
-            # Generate filename with timestamp
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_filename = f"Coded_{selected_question}_{timestamp}.xlsx"
-            
-            # Create Excel writer
-            with pd.ExcelWriter(output_filename, engine='xlsxwriter') as writer:
-                # Write main data with all columns
-                final_export.to_excel(
-                    writer,
-                    sheet_name='Coded Responses',
-                    index=False,
-                    startrow=0
-                )
-                
-                # Add codeframe documentation
-                codeframe_data = []
-                for code_num, details in st.session_state.codeframes.get(selected_question, {}).items():
-                    codeframe_data.append({
-                        'Code Number': code_num,
-                        'Code Name': details.get('code_name', ''),
-                        'Description': details.get('description', ''),
-                        'Keywords': ', '.join(details.get('keywords', []))
-                    })
-                
-                # Add error code if needed
-                if 999 in coded_data['codes'].explode().unique():
-                    codeframe_data.append({
-                        'Code Number': 999,
-                        'Code Name': 'Processing Error',
-                        'Description': 'Failed to code this response',
-                        'Keywords': ''
-                    })
-                
-                # Create codeframe sheet
-                if codeframe_data:
-                    codeframe_df = pd.DataFrame(codeframe_data)
-                    codeframe_df.to_excel(
-                        writer,
-                        sheet_name='Codeframe',
-                        index=False,
-                        startrow=3
-                    )
-                
-                # Add metadata
-                workbook = writer.book
-                worksheet = writer.sheets['Coded Responses']
-                metadata_format = workbook.add_format({'bold': True})
-                
-                worksheet.write(0, 0, 'Question Code:', metadata_format)
-                worksheet.write(0, 1, selected_question)
-                worksheet.write(1, 0, 'Question Label:', metadata_format)
-                worksheet.write(1, 1, question_dict.get(selected_question, ''))
-                worksheet.write(2, 0, 'Export Date:', metadata_format)
-                worksheet.write(2, 1, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                        # Generate filename with timestamp
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        output_filename = f"Coded_{selected_question}_{timestamp}.xlsx"
+                        
+                        # Create Excel writer
+                        with pd.ExcelWriter(output_filename, engine='xlsxwriter') as writer:
+                            # Write main data with all columns
+                            final_export.to_excel(
+                                writer,
+                                sheet_name='Coded Responses',
+                                index=False,
+                                startrow=0
+                            )
+                            
+                            # Add codeframe documentation
+                            codeframe_data = []
+                            for code_num, details in st.session_state.codeframes.get(selected_question, {}).items():
+                                codeframe_data.append({
+                                    'Code Number': code_num,
+                                    'Code Name': details.get('code_name', ''),
+                                    'Description': details.get('description', ''),
+                                    'Keywords': ', '.join(details.get('keywords', []))
+                                })
+                            
+                            # Add error code if needed
+                            if 999 in coded_data['codes'].explode().unique():
+                                codeframe_data.append({
+                                    'Code Number': 999,
+                                    'Code Name': 'Processing Error',
+                                    'Description': 'Failed to code this response',
+                                    'Keywords': ''
+                                })
+                            
+                            # Create codeframe sheet
+                            if codeframe_data:
+                                codeframe_df = pd.DataFrame(codeframe_data)
+                                codeframe_df.to_excel(
+                                    writer,
+                                    sheet_name='Codeframe',
+                                    index=False,
+                                    startrow=3
+                                )
+                            
+                            # Add metadata
+                            workbook = writer.book
+                            worksheet = writer.sheets['Coded Responses']
+                            metadata_format = workbook.add_format({'bold': True})
+                            
+                            worksheet.write(0, 0, 'Question Code:', metadata_format)
+                            worksheet.write(0, 1, selected_question)
+                            worksheet.write(1, 0, 'Question Label:', metadata_format)
+                            worksheet.write(1, 1, question_dict.get(selected_question, ''))
+                            worksheet.write(2, 0, 'Export Date:', metadata_format)
+                            worksheet.write(2, 1, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-            # Create download button
-            with open(output_filename, 'rb') as f:
-                st.download_button(
-                    label='📥 Download Full Dataset',
-                    data=f,
-                    file_name=output_filename,
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    help='Includes all original verbatim columns plus coding results'
-                )
-            
-            # Clean up temporary file
-            os.remove(output_filename)
-            
-        except Exception as e:
-            st.error(f'Export failed: {str(e)}')
-            with st.expander('Debug Details'):
-                st.write('Original columns:', list(st.session_state.verbatims.columns))
-                if 'final_export' in locals():
-                    st.write('Exported columns:', list(final_export.columns))
+                        # Create download button
+                        with open(output_filename, 'rb') as f:
+                            st.download_button(
+                                label='📥 Download Full Dataset',
+                                data=f,
+                                file_name=output_filename,
+                                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                help='Includes all original verbatim columns plus coding results'
+                            )
+                        
+                        # Clean up temporary file
+                        os.remove(output_filename)
+                        
+                    except Exception as e:
+                        st.error(f'Export failed: {str(e)}')
+                        with st.expander('Debug Details'):
+                            st.write('Original columns:', list(st.session_state.verbatims.columns))
+                            if 'final_export' in locals():
+                                st.write('Exported columns:', list(final_export.columns))
 # Footer
 st.markdown("---")
 current_year = datetime.datetime.now().year
