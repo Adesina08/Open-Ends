@@ -414,7 +414,7 @@ with st.container():
     st.markdown("<h2 style='color: black;'>🎯 Select Survey Question</h2>", unsafe_allow_html=True)
     if st.session_state.questions is not None:
         selected_question = st.selectbox(
-        <h4 style='color: black;'>Choose a Question</h4>", unsafe_allow_html=True),
+        <h4 style='color: black;'>Choose a Question</h4>, unsafe_allow_html=True),
             options=question_options,
             format_func=lambda x: f"{x}: {question_dict.get(x, '')}",
             help="Select which open-ended question to analyze"
