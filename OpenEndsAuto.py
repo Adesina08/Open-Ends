@@ -418,7 +418,6 @@ with st.container():
             options=question_options,
             format_func=lambda x: f"{x}: {question_dict.get(x, '')}",
             help="Select which open-ended question to analyze"
-        )
     else:
         st.info("ℹ️ Upload a file to begin analysis", icon="📤")
 
