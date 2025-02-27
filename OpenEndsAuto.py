@@ -244,7 +244,7 @@ def generate_codeframe_batch(responses, question_text, num_codes=10):
             api_response = call_openai_api(
                 prompt=prompt,
                 model=model_name,
-                max_tokens=2000,
+                max_tokens=3000,
                 temperature=0.2
             )
             codeframe_text = api_response.choices[0].message.content.strip()
