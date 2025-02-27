@@ -505,15 +505,16 @@ if (st.session_state.verbatims is not None and
             
             with st.expander("🧩 Topic Modeling", expanded=True):
                 st.markdown("**Discover latent themes in responses**")
-                if st.button("🌌 Run Topic Analysis", key="topic_model"):
-                    with st.spinner("Analyzing topics..."):
-                        topic_df, lda_model = generate_topic_modeling_for_question(responses)
-                        if topic_df is not None:
-                            st.session_state.topic_model[selected_question] = topic_df
-                            st.success("✅ Topic modeling complete!")
-                            st.dataframe(topic_df)
-                        else:
-                            st.error("❌ Failed to generate topics")
+    # Changed key here
+    if st.button("🌌 Run Topic Analysis", key="run_topic_model"):  
+        with st.spinner("Analyzing topics..."):
+            topic_df, lda_model = generate_topic_modeling_for_question(responses)
+            if topic_df is not None:
+                st.session_state.topic_model[selected_question] = topic_df
+                st.success("✅ Topic modeling complete!")
+                st.dataframe(topic_df)
+            else:
+                st.error("❌ Failed to generate topics")
 
     with tab3:  # Results Tab
         with st.container():
