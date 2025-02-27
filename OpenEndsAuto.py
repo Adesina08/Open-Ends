@@ -447,8 +447,8 @@ if (st.session_state.verbatims is not None and
             
             st.markdown("### 📋 Response Preview")
             st.dataframe(pd.DataFrame(responses, columns=["Responses"]).head(10), 
-                        use_container_width=True,
-                        height=300)
+                         use_container_width=True,
+                         height=300)
             
             st.markdown("### 🌈 Word Cloud")
             if st.button("Generate Word Cloud"):
@@ -456,7 +456,7 @@ if (st.session_state.verbatims is not None and
                     fig = generate_wordcloud(responses)
                     st.pyplot(fig)
 
-    with tab2:  # Coding Tab
+    with tab2:  # Auto-Coding Tab
         with st.container():
             st.markdown("### 🛠 Coding Tools")
             with st.expander("🧠 Automatic Codeframe Generation", expanded=True):
@@ -504,16 +504,15 @@ if (st.session_state.verbatims is not None and
             
             with st.expander("🧩 Topic Modeling", expanded=True):
                 st.markdown("**Discover latent themes in responses**")
-                # Changed key here
-            if st.button("🌌 Run Topic Analysis", key="run_topic_model"):  
-            with st.spinner("Analyzing topics..."):
-                topic_df, lda_model = generate_topic_modeling_for_question(responses)
-            if topic_df is not None:
-                st.session_state.topic_model[selected_question] = topic_df
-                st.success("✅ Topic modeling complete!")
-                st.dataframe(topic_df)
-            else:
-                st.error("❌ Failed to generate topics")
+                if st.button("🌌 Run Topic Analysis", key="run_topic_model"):
+                    with st.spinner("Analyzing topics..."):
+                        topic_df, lda_model = generate_topic_modeling_for_question(responses)
+                    if topic_df is not None:
+                        st.session_state.topic_model[selected_question] = topic_df
+                        st.success("✅ Topic modeling complete!")
+                        st.dataframe(topic_df)
+                    else:
+                        st.error("❌ Failed to generate topics")
 
     with tab3:  # Results Tab
         with st.container():
@@ -526,9 +525,9 @@ if (st.session_state.verbatims is not None and
                 st.markdown("#### Code Distribution")
                 code_counts = pd.Series([item for sublist in df_coded['codes'] for item in sublist]).value_counts()
                 fig = px.pie(code_counts, 
-                            names=code_counts.index, 
-                            values=code_counts.values,
-                            hole=0.4)
+                             names=code_counts.index, 
+                             values=code_counts.values,
+                             hole=0.4)
                 st.plotly_chart(fig, use_container_width=True)
                 st.markdown("#### Coded Responses Preview")
                 st.dataframe(df_coded.head(100), use_container_width=True, height=600)
@@ -607,3 +606,4 @@ else:
 st.markdown("---")
 current_year = datetime.datetime.now().year
 st.markdown(f"<div style='text-align: center; color: #666;'>© {current_year} Survey Open-ended Coding Automation Tool</div>", unsafe_allow_html=True)
+
