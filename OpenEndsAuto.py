@@ -150,7 +150,6 @@ def init_openai_client(api_key):
             )
         st.session_state.client = True
         st.session_state.current_model = model_name
-        st.success("API Key validated!")
         return True
     except Exception as e:
         st.error(f"Error initializing OpenAI client: {e}")
@@ -400,7 +399,7 @@ with st.sidebar:
 # ---------------------------
 # Main Interface - Modern Layout
 # ---------------------------
-st.title("📈 Survey Analysis Studio")
+st.title("📈 Survey Auto-Coding Tool")
 st.markdown("---")
 
 # Initialize question dictionary
@@ -412,10 +411,10 @@ if st.session_state.questions is not None:
 
 # Question Selection Card
 with st.container():
-    st.markdown("<h2 style='color: black;'>🎯 Select Analysis Target</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: black;'>🎯 Select Survey Question</h2>", unsafe_allow_html=True)
     if st.session_state.questions is not None:
         selected_question = st.selectbox(
-            "Choose a Question",
+        <h4 style='color: black;'>Choose a Question</h4>", unsafe_allow_html=True),
             options=question_options,
             format_func=lambda x: f"{x}: {question_dict.get(x, '')}",
             help="Select which open-ended question to analyze"
