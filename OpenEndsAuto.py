@@ -317,35 +317,22 @@ def assign_codes_for_question(responses, question_text, codeframe):
         "confidence": [0-100],
         "reasoning": "Explicit justification"
         }}"""
-        try:
-            model_name = st.session_state.get("current_model", "gpt-4o-mini")
-            api_response = call_openai_api(
-                prompt=prompt,
-                model=model_name,
-                max_tokens=2500,
-                temperature=0.1,
-                api_key=local_api_key
-            )
-            response_str = api_response.choices[0].message.content.strip()
-            assignment = json.loads(response_str)
-            return {
-                "response": response_text,
-                "codes": assignment.get("codes", []),
-                "confidence": assignment.get("confidence", []),
-                "reasoning": assignment.get("reasoning", "")
-            }
-        except Exception as e:
-            return {
-                "response": response_text,
-                "codes": [999],  # Changed from "Error" to numeric code
-                "confidence": [0],
-                "reasoning": f"Error: {str(e)}"
-            }
+    # Add Streamlit context to worker threads
+    from streamlit.runtime.scriptrunner import add_script_run_ctx
     
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(process_response, r) for r in responses]
-        for future in as_completed(futures):
-            results.append(future.result())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(process_response, r) for r in responses]
+            
+            # Add Streamlit context to each future
+            for future in futures:
+                add_script_run_ctx(future)
+            
+            for future in as_completed(futures):
+                results.append(future.result())
+    
     return pd.DataFrame(results)
 
 def generate_wordcloud(responses):
@@ -837,4 +824,3 @@ if (st.session_state.verbatims is not None and
 st.markdown("---")
 current_year = datetime.datetime.now().year
 st.markdown(f"<div style='text-align: center; color: #666;'>© {current_year} Survey Open-ended Coding Automation Tool</div>", unsafe_allow_html=True)
-
