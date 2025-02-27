@@ -1,7 +1,7 @@
 streamlit
 pandas
 numpy
-openai
+openai==0.28
 plotly
 scikit-learn
 wordcloud
