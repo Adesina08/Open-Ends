@@ -414,8 +414,8 @@ def generate_topic_modeling_for_question(responses, num_topics=5):
             "Topic Name": name,
             "Keywords": ", ".join(keywords[:10]),  # Show top 10 keywords
             "Keyword Weights": [float(weight) for weight in topic_weights[:10]],  # Raw weights for analysis
-            "Topic Weight": float(topic_weights.sum() / lda_model.components_.sum())
-        })
+            "Topic Weight": float(topic_weights.sum() / lda_model.components_.sum()) * 100
+            })
 
     return pd.DataFrame(topic_list), lda_model
 
@@ -573,13 +573,14 @@ if (st.session_state.verbatims is not None and
                         st.dataframe(
                             display_df.style.format({'Topic Weight': '{:.2%}'}),
                             use_container_width=True,
-                            height=400,
+                            height=500,
                             column_config={
                                 "Topic Name": "AI-Generated Theme",
                                 "Keywords": "Top Keywords",
                                 "Topic Weight": st.column_config.NumberColumn(
-                                    "Prevalence",
-                                    format="%.2f%%"
+                                    "Prevalence (%)",
+                                    format="%.2f",
+                                    help="Percentage of responses containing this theme"
                                 )
                             }
                         )
@@ -589,8 +590,7 @@ if (st.session_state.verbatims is not None and
                             topic_df,
                             x='Topic Name',
                             y='Topic Weight',
-                            color='Topic Name',
-                            text='Topic Weight',
+                            labels={'Topic Weight': 'Prevalence (%)'},
                             title="Topic Prevalence Distribution"
                         )
                         fig.update_layout(showlegend=False)
