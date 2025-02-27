@@ -14,6 +14,8 @@ from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime
+import warnings
+from streamlit.runtime.scriptrunner import ScriptRunContext
 
 # ---------------------------
 # Page and Session Configurations
