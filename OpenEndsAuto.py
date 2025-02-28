@@ -178,23 +178,31 @@ def update_codeframe(global_codeframe, batch_codeframe):
                 
             # Check if code exists by name
             exists = any(v.get("code_name") == code_name 
-                        for v in global_codeframe.values())
+                     for v in global_codeframe.values())
             
             if not exists:
                 code_number = st.session_state.code_counter
                 st.session_state.code_counter += 1
+                
+                # Handle keyword formatting safely
+                raw_keywords = code_entry.get("Keywords", "")
+                if isinstance(raw_keywords, str):
+                    # Split and clean string-formatted keywords
+                    keywords = [kw.strip() for kw in raw_keywords.split(", ") if kw.strip()]
+                else:
+                    # Assume list format if not string
+                    keywords = list(raw_keywords)
+
                 global_codeframe[code_number] = {
                     "code_name": code_name,
                     "description": code_entry.get("Description", ""),
-                    "keywords": code_entry.get("Keywords", []).split(", ") 
-                               if isinstance(code_entry.get("Keywords", ""), str)
-                               else code_entry.get("Keywords", [])
+                    "keywords": keywords
                 }
     elif isinstance(batch_codeframe, dict):
         # Original dictionary processing
         for code_name, details in batch_codeframe.items():
             exists = any(v.get("code_name") == code_name 
-                        for v in global_codeframe.values())
+                     for v in global_codeframe.values())
             if not exists:
                 code_number = st.session_state.code_counter
                 st.session_state.code_counter += 1
