@@ -168,16 +168,44 @@ def validate_json_response(response_text):
         return None
 
 def update_codeframe(global_codeframe, batch_codeframe):
-    for code_name, details in batch_codeframe.items():
-        exists = any(v.get("code_name") == code_name for v in global_codeframe.values())
-        if not exists:
-            code_number = st.session_state.code_counter
-            st.session_state.code_counter += 1
-            global_codeframe[code_number] = {
-                "code_name": code_name,
-                "description": details.get("description", ""),
-                "keywords": details.get("keywords", [])
-            }
+    # Handle both list and dict formats from different response versions
+    if isinstance(batch_codeframe, list):
+        # Process list of code objects
+        for code_entry in batch_codeframe:
+            code_name = code_entry.get("Code Name")
+            if not code_name:
+                continue
+                
+            # Check if code exists by name
+            exists = any(v.get("code_name") == code_name 
+                        for v in global_codeframe.values())
+            
+            if not exists:
+                code_number = st.session_state.code_counter
+                st.session_state.code_counter += 1
+                global_codeframe[code_number] = {
+                    "code_name": code_name,
+                    "description": code_entry.get("Description", ""),
+                    "keywords": code_entry.get("Keywords", []).split(", ") 
+                               if isinstance(code_entry.get("Keywords", ""), str)
+                               else code_entry.get("Keywords", [])
+                }
+    elif isinstance(batch_codeframe, dict):
+        # Original dictionary processing
+        for code_name, details in batch_codeframe.items():
+            exists = any(v.get("code_name") == code_name 
+                        for v in global_codeframe.values())
+            if not exists:
+                code_number = st.session_state.code_counter
+                st.session_state.code_counter += 1
+                global_codeframe[code_number] = {
+                    "code_name": code_name,
+                    "description": details.get("description", ""),
+                    "keywords": details.get("keywords", [])
+                }
+    else:
+        st.error(f"Unexpected codeframe format: {type(batch_codeframe)}")
+    
     return global_codeframe
 
 def display_codeframe(codeframe):
