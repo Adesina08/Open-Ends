@@ -313,7 +313,7 @@ def generate_codeframe_batch(responses, question_text, num_codes=10):
             api_response = call_openai_api(
                 prompt=prompt,
                 model=model_name,
-                max_tokens=3500,
+                max_tokens=1500,
                 temperature=0.2
             )
             codeframe_text = api_response.choices[0].message.content.strip()
@@ -431,7 +431,7 @@ def assign_codes_for_question(responses, question_text, codeframe):
                 api_response = call_openai_api(
                     prompt=prompt,
                     model=model_name,
-                    max_tokens=2500,
+                    max_tokens=2000,
                     temperature=0.1,
                     api_key=local_api_key
                 )
