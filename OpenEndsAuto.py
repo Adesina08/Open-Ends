@@ -292,55 +292,91 @@ def assign_codes_for_question(responses, question_text, codeframe):
     local_api_key = st.session_state.get("api_key", "")
     
     def process_response(response_text):
-        prompt = f"""CODING TASK: Assign codes to: "{response_text}"
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                prompt = f"""CODING TASK: Assign codes to: "{response_text}"
 
-        PROCESS:
-        1. Check Mandatory First:
-        - 97 if empty/meaningless
-        - 98 if refusal
-        - 99 if uncertainty
+                PROCESS:
+                1. Check Mandatory First:
+                - 97 if empty/meaningless
+                - 98 if refusal
+                - 99 if uncertainty
 
-        2. Substantive Coding:
-        {code_definitions}
+                2. Substantive Coding:
+                {code_definitions}
 
-        3. Validation:
-        - Must assign ≥1 code
-        - Confidence based on keyword match:
-            100%: Exact phrase match
-            80%: Partial match + relevant context
-            50%: Implied meaning
-        - If no match → 999 with 0% confidence
+                3. Validation:
+                - Must assign ≥1 code
+                - Confidence based on keyword match:
+                    100%: Exact phrase match
+                    80%: Partial match + relevant context
+                    50%: Implied meaning
+                - If no match → 999 with 0% confidence
 
-        OUTPUT FORMAT:
-        {{
-        "codes": [97-999],
-        "confidence": [0-100],
-        "reasoning": "Explicit justification"
-        }}"""
-        try:
-            model_name = st.session_state.get("current_model", "gpt-4o-mini")
-            api_response = call_openai_api(
-                prompt=prompt,
-                model=model_name,
-                max_tokens=1000,
-                temperature=0.1,
-                api_key=local_api_key
-            )
-            response_str = api_response.choices[0].message.content.strip()
-            assignment = json.loads(response_str)
-            return {
-                "response": response_text,
-                "codes": assignment.get("codes", []),
-                "confidence": assignment.get("confidence", []),
-                "reasoning": assignment.get("reasoning", "")
-            }
-        except Exception as e:
-            return {
-                "response": response_text,
-                "codes": [999],  # Changed from "Error" to numeric code
-                "confidence": [0],
-                "reasoning": f"Error: {str(e)}"
-            }
+                OUTPUT FORMAT - MUST FOLLOW:
+                {{
+                    "codes": [97, 101, ...],  # ONLY numbers between 97-999
+                    "confidence": [85, 70, ...],  # 0-100 for each code
+                    "reasoning": "Explicit matching logic"  # 1-2 sentences
+                }}"""
+
+                model_name = st.session_state.get("current_model", "gpt-4o-mini")
+                api_response = call_openai_api(
+                    prompt=prompt,
+                    model=model_name,
+                    max_tokens=1000,
+                    temperature=0.1,
+                    api_key=local_api_key
+                )
+                response_str = api_response.choices[0].message.content.strip()
+
+                # Clean and parse response
+                response_str = re.sub(r'^[^{]*', '', response_str)  # Remove non-JSON prefixes
+                response_str = re.sub(r'[^}]*$', '', response_str)  # Remove non-JSON suffixes
+                if response_str.startswith('```json'):
+                    response_str = response_str[6:-3].strip()
+                
+                assignment = json.loads(response_str)
+
+                # Validate response structure
+                if not all(key in assignment for key in ["codes", "confidence", "reasoning"]):
+                    raise ValueError("Missing required keys in response")
+
+                # Convert codes to integers
+                assignment["codes"] = [int(c) for c in assignment["codes"]]
+
+                return {
+                    "response": response_text,
+                    "codes": assignment["codes"],
+                    "confidence": assignment["confidence"],
+                    "reasoning": assignment["reasoning"]
+                }
+
+            except (json.JSONDecodeError, ValueError, TypeError, Exception) as e:
+                if attempt < max_retries:
+                    time.sleep(1.5 ** attempt)
+                    continue
+                
+                # Final fallback after retries
+                try:
+                    codes = list(map(int, re.findall(r'\b\d{2,3}\b', response_str)))
+                    if codes:
+                        return {
+                            "response": response_text,
+                            "codes": codes[:3],
+                            "confidence": [min(100, len(c)*30) for c in codes[:3]],
+                            "reasoning": f"Recovered from error: {str(e)}"
+                        }
+                except:
+                    pass
+
+                return {
+                    "response": response_text,
+                    "codes": [999],
+                    "confidence": [0],
+                    "reasoning": f"Critical error: {str(e)}"
+                }
     
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(process_response, r) for r in responses]
@@ -472,7 +508,7 @@ if st.session_state.questions is not None:
 with st.container():
     if st.session_state.questions is not None:
         selected_question = st.selectbox(
-        "Choose a Question",
+        "**Choose a Question**",
             options=question_options,
             format_func=lambda x: f"{x}: {question_dict.get(x, '')}",
             help="Select which open-ended question to analyze"
@@ -571,30 +607,28 @@ if (st.session_state.verbatims is not None and
                         # Display enhanced dataframe
                         display_df = topic_df[["Topic Number", "Topic Name", "Keywords", "Topic Weight"]]
                         st.dataframe(
-                            display_df.style.format({'Topic Weight': '{:.2%}'}),
+                            display_df,
                             use_container_width=True,
-                            height=400,
+                            height=200,
                             column_config={
                                 "Topic Name": "AI-Generated Theme",
-                                "Keywords": "Top Keywords",
+                                "Keywords": "Top Keywords", 
                                 "Topic Weight": st.column_config.NumberColumn(
-                                    "Prevalence",
-                                    format="%.2f"
+                                    "Prevalence (%)",
+                                    format="%.2f",
+                                    help="Percentage of responses containing this theme"
                                 )
                             }
                         )
-                        
-                        # Add visualizations
+
+                        # Update the visualization code:
                         fig = px.bar(
                             topic_df,
                             x='Topic Name',
                             y='Topic Weight',
-                            color='Topic Name',
-                            text='Topic Weight',
+                            labels={'Topic Weight': 'Prevalence (%)'},
                             title="Topic Prevalence Distribution"
                         )
-                        fig.update_layout(showlegend=False)
-                        st.plotly_chart(fig, use_container_width=True)
 
     with tab3:  # Results Tab
         with st.container():
@@ -643,7 +677,7 @@ if (st.session_state.verbatims is not None and
                     df_pie,
                     names='Code Name',
                     values='Count',
-                    hole=0.,
+                    hole=0.4,
                     title="Code Distribution",
                     labels={'Count': 'Responses'},
                     width=1000,  # Increased width
