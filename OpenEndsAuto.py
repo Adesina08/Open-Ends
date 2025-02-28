@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os, json, time, re, ast
-import openai
+from openai import OpenAI
 import plotly.express as px
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
@@ -111,21 +111,14 @@ for key, value in session_defaults.items():
         st.session_state[key] = value
 
 # ---------------------------
-# Helper Functions
+# Helper Functions (Reverted to OpenAI)
 # ---------------------------
 def call_openai_api(prompt, model, max_tokens, temperature, stop_sequences=None, api_key=None):
-    if api_key is None:
-        api_key = st.session_state.get("api_key", "")
-    openai.api_key = api_key
+    client = st.session_state.get("client")
+    if not client:
+        raise Exception("OpenAI client not initialized. Check your API key.")
     try:
-        st.session_state.last_api_request = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stop": stop_sequences
-        }
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -139,107 +132,134 @@ def call_openai_api(prompt, model, max_tokens, temperature, stop_sequences=None,
 
 def init_openai_client(api_key):
     try:
+        client = OpenAI(api_key=api_key)
         test_prompt = "Hello OpenAI!"
         model_name = "gpt-4o-mini"
         with st.spinner("Testing API connection..."):
-            _ = call_openai_api(
-                prompt=test_prompt,
+            _ = client.chat.completions.create(
                 model=model_name,
+                messages=[{"role": "user", "content": test_prompt}],
                 max_tokens=10,
                 temperature=0.0
             )
-        st.session_state.client = True
+        st.session_state.client = client
         st.session_state.current_model = model_name
         return True
     except Exception as e:
         st.error(f"Error initializing OpenAI client: {e}")
-        if hasattr(st.session_state, 'last_api_request'):
-            with st.expander("Debug Request Information"):
-                st.json(st.session_state.last_api_request)
         return False
 
 def validate_json_response(response_text):
     try:
-        cleaned = re.sub(r'^```json\s*|\s*```$', '', response_text)
-        cleaned = re.sub(r'(?<={|,)\s*([a-zA-Z_]+)\s*:', r'"\1":', cleaned)
-        return json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        st.error(f"JSON validation failed: {str(e)}\nRaw response: {response_text}")
+        # Remove all JSON markdown formatting
+        cleaned = re.sub(r'^```(json)?\s*|\s*```$', '', response_text, flags=re.DOTALL)
+        
+        # Fix common JSON issues
+        cleaned = cleaned.strip()
+        cleaned = re.sub(r'(?<!\\)\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'', cleaned)  # Remove invalid escapes
+        cleaned = re.sub(r',\s*}', '}', cleaned)  # Remove trailing commas
+        cleaned = re.sub(r',\s*]', ']', cleaned)   # Remove trailing commas
+        cleaned = re.sub(r'(?<={|,)\s*([a-zA-Z_]+)\s*:', r'"\1":', cleaned)  # Add quotes to keys
+        
+        # Try direct parse first
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Attempt to find JSON object in response
+            match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+            
+            # Try literal eval as fallback
+            return ast.literal_eval(cleaned)
+            
+    except Exception as e:
+        st.error(f"JSON validation failed: {str(e)}\nCleaned response: {cleaned}\nRaw response: {response_text}")
         return None
 
 def update_codeframe(global_codeframe, batch_codeframe):
-    # Handle both list and dict formats from different response versions
+    """Process batch codeframe into the global codeframe storage"""
+    # Convert both list and dict responses to standardized format
+    processed_codes = []
+    
     if isinstance(batch_codeframe, list):
-        # Process list of code objects
-        for code_entry in batch_codeframe:
-            code_name = code_entry.get("Code Name")
-            if not code_name:
-                continue
-                
-            # Check if code exists by name
-            exists = any(v.get("code_name") == code_name 
-                     for v in global_codeframe.values())
-            
-            if not exists:
-                code_number = st.session_state.code_counter
-                st.session_state.code_counter += 1
-                
-                # Handle keyword formatting safely
-                raw_keywords = code_entry.get("Keywords", "")
-                if isinstance(raw_keywords, str):
-                    # Split and clean string-formatted keywords
-                    keywords = [kw.strip() for kw in raw_keywords.split(", ") if kw.strip()]
-                else:
-                    # Assume list format if not string
-                    keywords = list(raw_keywords)
-
-                global_codeframe[code_number] = {
-                    "code_name": code_name,
-                    "description": code_entry.get("Description", ""),
-                    "keywords": keywords
-                }
+        # Directly use list format from API response
+        processed_codes = batch_codeframe
     elif isinstance(batch_codeframe, dict):
-        # Original dictionary processing
-        for code_name, details in batch_codeframe.items():
-            exists = any(v.get("code_name") == code_name 
-                     for v in global_codeframe.values())
-            if not exists:
-                code_number = st.session_state.code_counter
-                st.session_state.code_counter += 1
-                global_codeframe[code_number] = {
-                    "code_name": code_name,
-                    "description": details.get("description", ""),
-                    "keywords": details.get("keywords", [])
-                }
-    else:
-        st.error(f"Unexpected codeframe format: {type(batch_codeframe)}")
+        # Convert old dict format to list format
+        processed_codes = [
+            {
+                "Theme": details.get("Theme", ""),
+                "Subtheme": details.get("Subtheme", ""),
+                "Code Name": code_name,
+                "Description": details.get("Description", ""),
+                "Example Response": details.get("Example Response", ""),
+                "Sentiment": details.get("Sentiment", "Neutral")
+            }
+            for code_name, details in batch_codeframe.items()
+        ]
+    
+    # Add codes to global codeframe with unique numeric IDs
+    for code_entry in processed_codes:
+        # Check for existing code by name
+        exists = any(
+            entry["Code Name"] == code_entry["Code Name"]
+            for entry in global_codeframe.values()
+        )
+        
+        if not exists and code_entry["Code Name"]:
+            code_number = st.session_state.code_counter
+            st.session_state.code_counter += 1
+            
+            # Map to standardized format
+            global_codeframe[code_number] = {
+                "Theme": code_entry.get("Theme", "Uncategorized"),
+                "Subtheme": code_entry.get("Subtheme", ""),
+                "Code Name": code_entry["Code Name"],
+                "Description": code_entry.get("Description", ""),
+                "Example Response": code_entry.get("Example Response", ""),
+                "Sentiment": code_entry.get("Sentiment", "Neutral"),
+                "Keywords": code_entry.get("Keywords", [])
+            }
     
     return global_codeframe
 
 def display_codeframe(codeframe):
+    """Display codeframe in the desired dataframe format"""
     if not codeframe:
         st.warning("No codeframe generated yet")
         return
     
-    # Add error code with proper keyword formatting
-    error_code = {
-        "Code Number": 999,
-        "Code Name": "Processing Error",
-        "Description": "Failed to code this response",
-        "Keywords": ""  # Changed from empty list to empty string
-    }
-    
+    # Create dataframe from the standardized format
     df = pd.DataFrame([
-        error_code,
-        *[{
-            "Code Number": code_num,
-            "Code Name": details.get("code_name", ""),
-            "Description": details.get("description", ""),
-            "Keywords": ", ".join(details.get("keywords", []))  # Ensure this is always a string
-        } for code_num, details in codeframe.items()]
+        {
+            "Theme": details["Theme"],
+            "Subtheme": details["Subtheme"],
+            "Code Name": details["Code Name"],
+            "Description": details["Description"],
+            "Example Response": details["Example Response"],
+            "Sentiment": details["Sentiment"]
+        }
+        for code_num, details in codeframe.items()
     ])
     
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    # Add error code row
+    error_row = {
+        "Theme": "System",
+        "Subtheme": "Errors",
+        "Code Name": 999,
+        "Description": "Failed to code this response",
+        "Example Response": "",
+        "Sentiment": "Neutral"
+    }
+    df = pd.concat([df, pd.DataFrame([error_row])], ignore_index=True)
+    
+    st.dataframe(
+        df,
+        use_container_width=True,
+        column_order=["Theme", "Subtheme", "Code Name", "Description", "Example Response", "Sentiment"],
+        hide_index=True
+    )
 
 def generate_codeframe_batch(responses, question_text, num_codes=10):
     responses_text = "\n".join(responses)
@@ -470,6 +490,7 @@ def assign_codes_for_question(responses, question_text, codeframe):
             results.append(future.result())
     return pd.DataFrame(results)
 
+
 def generate_wordcloud(responses):
     text = " ".join(responses)
     wc = WordCloud(width=800, height=400, background_color='white').generate(text)
@@ -479,7 +500,7 @@ def generate_wordcloud(responses):
     return fig
 
 def generate_topic_names(keywords_list):
-    """Generate human-readable topic names using OpenAI"""
+    """Generate human-readable topic names using OpenRouter"""
     prompt = f"""Analyze these keyword groups and generate a short, descriptive topic name (2-4 words) for each.
     Follow these rules:
     1. Use title case
@@ -495,7 +516,7 @@ def generate_topic_names(keywords_list):
     try:
         response = call_openai_api(
             prompt=prompt,
-            model="gpt-4o-mini",  # Using faster model for this task
+            model="gpt-4o-mini",
             max_tokens=100,
             temperature=0.3
         )
@@ -763,7 +784,7 @@ if (st.session_state.verbatims is not None and
                     df_pie,
                     names='Code Name',
                     values='Count',
-                    hole=0.4,
+                    hole=0.,
                     title="Code Distribution",
                     labels={'Count': 'Responses'},
                     width=1000,  # Increased width
