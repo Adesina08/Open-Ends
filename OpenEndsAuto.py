@@ -207,42 +207,57 @@ def display_codeframe(codeframe):
 
 def generate_codeframe_batch(responses, question_text, num_codes=10):
     responses_text = "\n".join(responses)
-    prompt = f"""ANALYSIS TASK: Create exhaustive codeframe for survey responses.
+    prompt = f"""CODEFRAME CREATION TASK:
+                Objective: Generate a detailed codeframe to categorize open-ended survey responses regarding "{question_text}".
+                Context:
+                - Survey Goal: Identify pain points in user experience.
+                - Sample Question: "{question_text}"
 
-    RULES:
-    1. MANDATORY CODES (include verbatim matches):
-    97 - Nothing: Empty responses, "nothing", "nada"
-    98 - No answer: "no comment", "no opinion"
-    99 - Don't know: "don't know", "unsure", "dk"
+                Instructions:
+                1. Create a codeframe that organizes responses into high-level themes, subthemes, and individual codes.
+                2. For each code, provide:
+                - Code Name: A concise label (e.g., "Pricing Concerns").
+                - Description: A clear definition explaining the scope (e.g., "Mentions of affordability, value, or cost").
+                - Inclusion Criteria: Conditions under which this code should be applied (e.g., "Responses referencing price comparisons").
+                - Exclusion Criteria: Conditions under which the code should NOT be applied (e.g., "Mentions of product features without pricing context").
+                - Example Response: A real or hypothetical quote illustrating the code (e.g., "It’s too expensive compared to competitors").
+                - Sentiment: Indicate if the response tone is Positive, Neutral, or Negative (if applicable).
+                3. Special Cases:
+                - Include a "Miscellaneous/Other" category for rare or ambiguous responses.
+                - Include a "Non-Applicable" code for irrelevant or unintelligible answers.
+                4. Process:
+                - Step 1: List all possible codes from sample responses. For context, include the first 500 characters of responses below:
+                    {responses_text[:500]}
+                - Step 2: Group the codes into logical themes and subthemes.
+                - Step 3: Refine the codes to avoid redundancy and ensure they are mutually exclusive.
+                - Step 4: Validate that the codes cover at least 95% of hypothetical responses.
 
-    2. CODE CREATION RULES:
-    - Create 8-12 substantive codes beyond mandatory ones
-    - Each code must have:
-        * 3-5 precise keywords/phrases (include variants)
-        * Clear scope definition
-    - Ensure mutual exclusivity (no overlap)
-    - Cover 100% of sample responses
+                Mandatory Codes (apply as verbatim matches):
+                97 - Nothing: Empty responses, "nothing", "nada"
+                98 - No Answer: "no comment", "no opinion"
+                99 - Don't Know: "don't know", "unsure", "dk"
 
-    3. RESPONSE EXAMPLES:
-    {responses_text[:500]}  # Show first 500 chars for context
+                OUTPUT FORMAT:
+                Return a JSON array of objects, where each object represents a row in a table with the following keys:
+                - "Theme"
+                - "Subtheme"
+                - "Code Name"
+                - "Description"
+                - "Example Response"
+                - "Sentiment"
 
-    FORMAT:
-    {{
-    "Code Name (Detailed)": {{
-        "description": "Scope covering specific response types",
-        "keywords": ["exact", "variants", "phrases"]
-    }},
-    // ... other codes
-    }}
-
-    OUTPUT: Pure JSON with NO additional text/explanation."""
+                IMPORTANT:
+                - Use double quotes for all keys and string values.
+                - Do not include any trailing commas or comments.
+                - Ensure the JSON is valid and all brackets are properly closed.
+                """
     with st.spinner("Generating codeframe..."):
         try:
             model_name = st.session_state.get("current_model", "gpt-4o-mini")
             api_response = call_openai_api(
                 prompt=prompt,
                 model=model_name,
-                max_tokens=2000,
+                max_tokens=3500,
                 temperature=0.2
             )
             codeframe_text = api_response.choices[0].message.content.strip()
@@ -251,15 +266,12 @@ def generate_codeframe_batch(responses, question_text, num_codes=10):
             if batch_codeframe is None:
                 return {}
             
-            # Convert string keywords to lists if needed
-            for code_name, details in batch_codeframe.items():
-                if isinstance(details.get("keywords", []), str):
-                    details["keywords"] = [k.strip() for k in details["keywords"].split(",")]
-            
+            # (Optional) Process the response if any post-conversion adjustments are needed
             return batch_codeframe
         except Exception as e:
             st.error(f"Error generating codeframe: {e}")
             return {}
+
 
 def process_all_responses_for_question(responses, question_text, num_codes=10, batch_size=200):
     responses = list(set(responses))
@@ -295,37 +307,75 @@ def assign_codes_for_question(responses, question_text, codeframe):
         max_retries = 2
         for attempt in range(max_retries + 1):
             try:
-                prompt = f"""CODING TASK: Assign codes to: "{response_text}"
+                prompt = f"""CODING TASK: Evaluate the following survey response and assign the appropriate codes:"{response_text}"
+                            CONTEXT:
+                            - This response is provided in the context of the survey question: "{question_text}".
+                            - A detailed codeframe with specific code definitions is provided below. Each code includes precise keywords/phrases, scope definitions, and inclusion/exclusion criteria.
+                            - Mandatory Codes:
+                                * 97 - Nothing: For empty or meaningless responses (e.g., "nothing", "nada").
+                                * 98 - No Answer: For responses indicating refusal (e.g., "no comment", "no opinion").
+                                * 99 - Don't Know: For responses indicating uncertainty (e.g., "don't know", "unsure", "dk").
 
-                PROCESS:
-                1. Check Mandatory First:
-                - 97 if empty/meaningless
-                - 98 if refusal
-                - 99 if uncertainty
+                            INSTRUCTIONS:
 
-                2. Substantive Coding:
-                {code_definitions}
+                            1. Preliminary Check – Mandatory Codes:
+                            - If the response is empty or contains words like "nothing" or "nada", immediately assign code 97.
+                            - If the response contains a refusal (e.g., "no comment" or "no opinion"), assign code 98.
+                            - If the response expresses uncertainty (e.g., "don't know", "unsure", "dk"), assign code 99.
+                            - In such cases, provide a brief explanation and do not evaluate further.
 
-                3. Validation:
-                - Must assign ≥1 code
-                - Confidence based on keyword match:
-                    100%: Exact phrase match
-                    80%: Partial match + relevant context
-                    50%: Implied meaning
-                - If no match → 999 with 0% confidence
+                            2. Substantive Coding:
+                            - Review the provided code definitions carefully:
+                            {code_definitions}
+                            - For each code, compare the response text against its keywords/phrases and scope:
+                                * If an exact keyword or phrase is present, consider that a 100% confidence match.
+                                * If a partial keyword or a variant is present in a relevant context, consider that an 80% confidence match.
+                                * If the meaning is only implied by the response, assign a 50% confidence match.
+                            - Ensure that the selected codes are mutually exclusive and collectively cover the response.
+                            - If no substantive code is applicable, assign code 999 with 0% confidence to indicate a non-match.
 
-                OUTPUT FORMAT - MUST FOLLOW:
-                {{
-                    "codes": [97, 101, ...],  # ONLY numbers between 97-999
-                    "confidence": [85, 70, ...],  # 0-100 for each code
-                    "reasoning": "Explicit matching logic"  # 1-2 sentences
-                }}"""
+                            3. Confidence Evaluation:
+                            - For each assigned code, determine a numerical confidence level (0 to 100) based on the strength of the match:
+                                * 100% for exact phrase matches.
+                                * 80% for partial matches with strong contextual evidence.
+                                * 50% for implied meaning.
+                            - Each response must have at least one code assigned. If no match is found after thorough analysis, use code 999 with 0% confidence.
 
+                            4. Validation and Reasoning:
+                            - Validate that at least one code is assigned.
+                            - Provide a concise reasoning (1-2 sentences) that details how each code was selected based on the presence of keywords, context, and any partial or exact matches.
+                            - Your reasoning should explain the matching logic clearly, referencing key phrases or context that led to the assignment of each code.
+
+                            OUTPUT FORMAT – YOU MUST FOLLOW EXACTLY:
+                            Return a JSON object that exactly adheres to this structure (and nothing else):
+                            {{
+                                "codes": [list of integers],           // Only numbers between 97 and 999
+                                "confidence": [list of integers],        // Confidence levels (0-100) for each code
+                                "reasoning": "A brief explanation of the matching logic used"
+                            }}
+
+                            GENERAL RULES:
+                            - Use double quotes for all keys and string values.
+                            - Do not include any additional keys or metadata.
+                            - Ensure the output is valid JSON with all brackets properly closed.
+                            - Avoid any extra commentary or non-JSON text.
+                            - Follow the instructions precisely and return only the JSON object as specified.
+
+                            EXAMPLE:
+                            If the response is "I really love the fast service but found the pricing a bit steep", a possible output might be:
+                            {{
+                                "codes": [101, 102],
+                                "confidence": [100, 80],
+                                "reasoning": "Exact match for 'fast service' aligned with the Service Speed code (101) and a partial match for pricing concerns aligning with code 102."
+                            }}
+
+                            Please provide your analysis strictly according to these instructions.
+                            """
                 model_name = st.session_state.get("current_model", "gpt-4o-mini")
                 api_response = call_openai_api(
                     prompt=prompt,
                     model=model_name,
-                    max_tokens=1000,
+                    max_tokens=2500,
                     temperature=0.1,
                     api_key=local_api_key
                 )
@@ -365,7 +415,7 @@ def assign_codes_for_question(responses, question_text, codeframe):
                         return {
                             "response": response_text,
                             "codes": codes[:3],
-                            "confidence": [min(100, len(c)*30) for c in codes[:3]],
+                            "confidence": [min(100, len(str(c))*30) for c in codes[:3]],
                             "reasoning": f"Recovered from error: {str(e)}"
                         }
                 except:
