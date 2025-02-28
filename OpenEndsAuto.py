@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os, json, time, re, ast
-import openai
+import OpenAI
 import plotly.express as px
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
