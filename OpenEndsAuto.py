@@ -356,7 +356,7 @@ def process_all_responses_for_question(responses, question_text, num_codes=10, b
 
 def assign_codes_for_question(responses, question_text, codeframe):
     results = []
-    code_definitions = "\n".join([f"{code}: {details['description']}" for code, details in codeframe.items()])
+    code_definitions = "\n".join([f"{code}: {details['Description']}" for code, details in codeframe.items()])
     local_api_key = st.session_state.get("api_key", "")
     
     def process_response(response_text):
@@ -830,7 +830,7 @@ if (st.session_state.verbatims is not None and
                         codeframe_df = pd.DataFrame([{
                             "Code Number": code,
                             "Code Name": details.get("code_name", ""),
-                            "Description": details.get("description", ""),
+                            "Description": details.get("Description", ""),
                             "Keywords": ", ".join(details.get("keywords", []))
                         } for code, details in codeframe.items()])
                         
@@ -940,7 +940,7 @@ if (st.session_state.verbatims is not None and
                                     codeframe_data.append({
                                         'Code Number': code_num,
                                         'Code Name': details.get('code_name', ''),
-                                        'Description': details.get('description', ''),
+                                        'Description': details.get('Description', ''),
                                         'Keywords': ', '.join(details.get('keywords', []))
                                     })
                                 
