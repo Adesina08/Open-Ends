@@ -716,7 +716,7 @@ if (st.session_state.verbatims is not None and
                         st.dataframe(
                             display_df,
                             use_container_width=True,
-                            height=200,
+                            height=400,
                             column_config={
                                 "Topic Name": "AI-Generated Theme",
                                 "Keywords": "Top Keywords", 
