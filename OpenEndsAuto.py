@@ -431,7 +431,7 @@ def assign_codes_for_question(responses, question_text, codeframe):
                 api_response = call_openai_api(
                     prompt=prompt,
                     model=model_name,
-                    max_tokens=2000,
+                    max_tokens=3000,
                     temperature=0.1,
                     api_key=local_api_key
                 )
