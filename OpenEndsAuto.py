@@ -139,7 +139,7 @@ def init_openai_client(api_key):
             _ = client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": test_prompt}],
-                max_tokens=10,
+                max_tokens=1,
                 temperature=0.0
             )
         st.session_state.client = client
@@ -313,7 +313,7 @@ def generate_codeframe_batch(responses, question_text, num_codes=10):
             api_response = call_openai_api(
                 prompt=prompt,
                 model=model_name,
-                max_tokens=1500,
+                max_tokens=1000,
                 temperature=0.2
             )
             codeframe_text = api_response.choices[0].message.content.strip()
@@ -327,45 +327,50 @@ def generate_codeframe_batch(responses, question_text, num_codes=10):
         except Exception as e:
             st.error(f"Error generating codeframe: {e}")
             return {}
-
-
+        
+# Add this function in the Helper Functions section
 def process_all_responses_for_question(responses, question_text, num_codes=10, batch_size=200):
-    responses = list(set(responses))
-    total_responses = len(responses)
-    if total_responses <= batch_size:
-        codeframe = generate_codeframe_batch(responses, question_text, num_codes)
-        return update_codeframe({}, codeframe)
-    else:
-        np.random.shuffle(responses)
-        global_codeframe = {}
-        total_batches = len(responses) // batch_size + (1 if len(responses) % batch_size != 0 else 0)
-        progress_bar = st.progress(0)
-        status_container = st.empty()
-        for batch_index in range(total_batches):
-            status_container.markdown(f"**Processing Batch {batch_index+1}/{total_batches}**")
-            start_idx = batch_index * batch_size
-            end_idx = start_idx + batch_size
-            batch = responses[start_idx:end_idx]
-            batch_codeframe = generate_codeframe_batch(batch, question_text, num_codes)
+    """Process large response sets in batches and aggregate results"""
+    global_codeframe = {}
+    
+    # Split responses into batches
+    batches = [responses[i:i+batch_size] 
+               for i in range(0, len(responses), batch_size)]
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for batch_num, batch_responses in enumerate(batches):
+        try:
+            status_text.text(f"Processing batch {batch_num+1}/{len(batches)}...")
+            batch_codeframe = generate_codeframe_batch(
+                batch_responses, 
+                question_text, 
+                num_codes
+            )
             global_codeframe = update_codeframe(global_codeframe, batch_codeframe)
-            progress_bar.progress((batch_index+1) / total_batches)
-            time.sleep(1)
-        progress_bar.empty()
-        status_container.success("✅ All batches processed successfully!")
-        return global_codeframe
+            progress_bar.progress((batch_num+1)/len(batches))
+        except Exception as e:
+            st.error(f"Error processing batch {batch_num+1}: {str(e)}")
+            continue
+    
+    status_text.empty()
+    progress_bar.empty()
+    return global_codeframe
+
 
 def assign_codes_for_question(responses, question_text, codeframe):
+    """Assign codes to responses using OpenAI API with parallel processing"""
     results = []
     code_definitions = "\n".join([f"{code}: {details['Description']}" for code, details in codeframe.items()])
-    local_api_key = st.session_state.get("api_key", "")
-    
-    # Capture the client from session state before starting threads
     client = st.session_state.get("client")
+    
     if client is None:
-        st.error("OpenAI client is not initialized. Please reinitialize it.")
+        st.error("OpenAI client is not initialized. Please check your API key.")
         return pd.DataFrame()
 
-    def process_response(response_text, client):
+    def process_response(response_text):
+        """Process individual response with retry logic"""
         max_retries = 2
         for attempt in range(max_retries + 1):
             try:
@@ -379,28 +384,55 @@ def assign_codes_for_question(responses, question_text, codeframe):
                                 * 99 - Don't Know: For responses indicating uncertainty (e.g., "don't know", "unsure", "dk").
 
                             INSTRUCTIONS:
-                            ... (rest of your prompt) ...
+                            1. Preliminary Check – Mandatory Codes:
+                            - If the response is empty or contains words like "nothing" or "nada", immediately assign code 97.
+                            - If the response contains a refusal (e.g., "no comment" or "no opinion"), assign code 98.
+                            - If the response expresses uncertainty (e.g., "don't know", "unsure", "dk"), assign code 99.
+                            - In such cases, provide a brief explanation and do not evaluate further.
+
+                            2. Substantive Coding:
+                            - Review the provided code definitions carefully:
+                            {code_definitions}
+                            - For each code, compare the response text against its keywords/phrases and scope:
+                                * If an exact keyword or phrase is present, consider that a 100% confidence match.
+                                * If a partial keyword or a variant is present in a relevant context, consider that an 80% confidence match.
+                                * If the meaning is only implied by the response, assign a 50% confidence match.
+                            - Ensure that the selected codes are mutually exclusive and collectively cover the response.
+                            - If no substantive code is applicable, assign code 999 with 0% confidence to indicate a non-match.
+
+                            3. Confidence Evaluation:
+                            - For each assigned code, determine a numerical confidence level (0 to 100) based on the strength of the match.
+
+                            4. Validation:
+                            - Validate that at least one code is assigned.
+
+                            OUTPUT FORMAT – JSON object:
+                            {{
+                                "codes": [list of integers],   
+                                "confidence": [list of integers]
+                            }}
                             """
+
                 model_name = st.session_state.get("current_model", "gpt-4o-mini")
                 api_response = client.chat.completions.create(
                     model=model_name,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=3000,
+                    max_tokens=1000,
                     temperature=0.1
                 )
                 response_str = api_response.choices[0].message.content.strip()
                 
-                # Clean and parse response
-                response_str = re.sub(r'^[^{]*', '', response_str)  # Remove non-JSON prefixes
-                response_str = re.sub(r'[^}]*$', '', response_str)    # Remove non-JSON suffixes
+                # Clean JSON response
+                response_str = re.sub(r'^[^{]*', '', response_str)
+                response_str = re.sub(r'[^}]*$', '', response_str)
                 if response_str.startswith('```json'):
                     response_str = response_str[6:-3].strip()
                 
                 assignment = json.loads(response_str)
 
                 # Validate response structure
-                if not all(key in assignment for key in ["codes", "confidence", "reasoning"]):
-                    raise ValueError("Missing required keys in response")
+                if not all(key in assignment for key in ["codes", "confidence"]):
+                    raise ValueError("Invalid response format")
 
                 # Convert codes to integers
                 assignment["codes"] = [int(c) for c in assignment["codes"]]
@@ -408,39 +440,45 @@ def assign_codes_for_question(responses, question_text, codeframe):
                 return {
                     "response": response_text,
                     "codes": assignment["codes"],
-                    "confidence": assignment["confidence"],
-                    "reasoning": assignment["reasoning"]
+                    "confidence": assignment["confidence"]
                 }
-            except (json.JSONDecodeError, ValueError, TypeError, Exception) as e:
+
+            except Exception as e:
                 if attempt < max_retries:
                     time.sleep(1.5 ** attempt)
                     continue
-                # Final fallback after retries
-                try:
-                    codes = list(map(int, re.findall(r'\b\d{2,3}\b', response_str)))
-                    if codes:
-                        return {
-                            "response": response_text,
-                            "codes": codes[:3],
-                            "confidence": [min(100, len(str(c)) * 30) for c in codes[:3]],
-                            "reasoning": f"Recovered from error: {str(e)}"
-                        }
-                except:
-                    pass
                 return {
                     "response": response_text,
                     "codes": [999],
-                    "confidence": [0],
-                    "reasoning": f"Critical error: {str(e)}"
+                    "confidence": [0]
                 }
 
-    # Pass the captured client to each worker thread
+    # Parallel processing with progress tracking
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(process_response, r, client) for r in responses]
-        for future in as_completed(futures):
-            results.append(future.result())
-    return pd.DataFrame(results)
+        futures = [executor.submit(process_response, r) for r in responses]
+        
+        progress_bar = st.progress(0)
+        results = []
+        
+        for i, future in enumerate(as_completed(futures)):
+            try:
+                result = future.result()
+                results.append(result)
+                progress_bar.progress((i+1)/len(futures))
+            except Exception as e:
+                results.append({
+                    "response": responses[i],
+                    "codes": [999],
+                    "confidence": [0]
+                })
+        progress_bar.empty()
 
+    # Create DataFrame with proper error handling
+    try:
+        return pd.DataFrame(results)
+    except Exception as e:
+        st.error(f"Error creating results dataframe: {str(e)}")
+        return pd.DataFrame(columns=["response", "codes", "confidence"])
 
 
 def generate_wordcloud(responses):
@@ -469,7 +507,7 @@ def generate_topic_names(keywords_list):
         response = call_openai_api(
             prompt=prompt,
             model="gpt-4o-mini",
-            max_tokens=100,
+            max_tokens=50,
             temperature=0.3
         )
         names = response.choices[0].message.content.strip().split(', ')
@@ -610,8 +648,15 @@ if (st.session_state.verbatims is not None and
     with tab2:  # Auto-Coding Tab
         with st.container():
             st.markdown("### 🛠 Coding Tools")
-            with st.expander("🧠 Automatic Codeframe Generation", expanded=True):
-                st.markdown("**AI-powered codeframe creation**")
+            
+            # =============================================
+            # Codeframe Generation Section
+            # =============================================
+            # Check if codeframe exists for current question
+            codeframe_exists = selected_question in st.session_state.codeframes
+            
+            # Create expander that auto-expands when new content exists
+            with st.expander("🧠 Automatic Codeframe Generation", expanded=codeframe_exists):
                 if st.button("🚀 Generate Codeframe", key="gen_codeframe"):
                     if not st.session_state.api_key:
                         st.error("❌ API key required")
@@ -632,14 +677,24 @@ if (st.session_state.verbatims is not None and
                                     num_codes=default_num_codes, 
                                     batch_size=200
                                 )
+                            # Store codeframe and force display
                             st.session_state.codeframes[selected_question] = codeframe
-                        st.success("✅ Codeframe generated!")
-                        display_codeframe(codeframe)
+                            st.session_state[f"show_codeframe_{selected_question}"] = True
+                            st.success("✅ Codeframe generated!")
+                            st.rerun()  # Force immediate update
+                
+                # Display immediately after generation
+                if codeframe_exists:
+                    display_codeframe(st.session_state.codeframes[selected_question])
+
+            # =============================================
+            # Coding Execution Section
+            # =============================================
+            coded_data_exists = selected_question in st.session_state.coded_data
             
-            with st.expander("🔖 Assign Codes to Responses", expanded=True):
-                st.markdown("**Automated coding using generated codeframe**")
+            with st.expander("🔖 Assign Codes to Responses", expanded=coded_data_exists):
                 if st.button("📝 Start Coding", key="assign_codes"):
-                    if selected_question not in st.session_state.codeframes:
+                    if not codeframe_exists:
                         st.error("❌ Generate codeframe first")
                     else:
                         with st.spinner("Coding responses..."):
@@ -649,12 +704,28 @@ if (st.session_state.verbatims is not None and
                                 question_text=question_dict.get(selected_question, ""), 
                                 codeframe=codeframe
                             )
+                            # Store results and force display
                             st.session_state.coded_data[selected_question] = df_coded
-                        st.success(f"✅ Coded {len(df_coded)} responses!")
-                        st.dataframe(df_coded.head(30))
-            
-            with st.expander("🧩 Topic Modeling", expanded=True):
-                st.markdown("**Discover latent themes in responses**")
+                            st.session_state[f"show_coding_{selected_question}"] = True
+                            st.success(f"✅ Coded {len(df_coded)} responses!")
+                            st.rerun()  # Force immediate update
+                
+                # Display immediately after coding
+                if coded_data_exists:
+                    df_coded = st.session_state.coded_data[selected_question]
+                    st.dataframe(
+                        df_coded.head(30),
+                        column_config={
+                            "codes": "Assigned Codes",
+                            "confidence": "Confidence"
+                        },
+                        use_container_width=True,
+                    )
+
+            # =============================================
+            # Topic Modeling Section
+            # =============================================
+            with st.expander("🧩 Topic Modeling"):
                 if st.button("🌌 Run Topic Analysis", key="run_topic_model"):
                     with st.spinner("Analyzing topics..."):
                         topic_df, lda_model = generate_topic_modeling_for_question(responses)
@@ -663,12 +734,10 @@ if (st.session_state.verbatims is not None and
                         st.session_state.topic_model[selected_question] = topic_df
                         st.success("✅ Topic modeling complete!")
                         
-                        # Display enhanced dataframe
                         display_df = topic_df[["Topic Number", "Topic Name", "Keywords", "Topic Weight"]]
                         st.dataframe(
                             display_df,
                             use_container_width=True,
-                            height=400,
                             column_config={
                                 "Topic Name": "AI-Generated Theme",
                                 "Keywords": "Top Keywords", 
@@ -680,7 +749,6 @@ if (st.session_state.verbatims is not None and
                             }
                         )
 
-                        # Update the visualization code:
                         fig = px.bar(
                             topic_df,
                             x='Topic Name',
@@ -688,82 +756,83 @@ if (st.session_state.verbatims is not None and
                             labels={'Topic Weight': 'Prevalence (%)'},
                             title="Topic Prevalence Distribution"
                         )
+                        st.plotly_chart(fig, use_container_width=True)
 
     with tab3:  # Results Tab
         with st.container():
             st.markdown("### 📋 Coding Results")
             if selected_question in st.session_state.coded_data:
                 df_coded = st.session_state.coded_data[selected_question].copy()
-                df_coded['codes'] = df_coded['codes'].apply(
-                    lambda x: [c for c in x if isinstance(c, (int, float))]
-                )
-                st.markdown("#### Code Distribution")
-                
-                # Get code counts and codeframe
-                code_counts = pd.Series(
-                    [item for sublist in df_coded['codes'] for item in sublist]
-                ).value_counts()
                 codeframe = st.session_state.codeframes.get(selected_question, {})
                 
-                # Map code numbers to code names
-                code_names = []
-                for code_num in code_counts.index:
+                # Extract code labels from codeframe
+                def get_code_label(code_num):
                     if code_num == 999:
-                        code_names.append("Processing Error")
-                    else:
-                        # Use get() with default value
-                        code_info = codeframe.get(int(code_num), {})
-                        code_names.append(
-                            code_info.get("code_name", f"Code {code_num}")
-                        )
+                        return "Processing Error"
+                    code_info = codeframe.get(int(code_num), {})
+                    return code_info.get("Code Name", f"Code {code_num}")
 
-                # Create DataFrame for visualization
-                df_pie = pd.DataFrame({
-                    "Code Name": code_names,
-                    "Count": code_counts.values
+                # Process codes and get labels
+                df_coded['code_labels'] = df_coded['codes'].apply(
+                    lambda codes: [get_code_label(c) for c in codes]
+                )
+
+                # Flatten the list of code labels and count occurrences
+                all_labels = [label for sublist in df_coded['code_labels'] for label in sublist]
+                label_counts = pd.Series(all_labels).value_counts().reset_index()
+                label_counts.columns = ['Code Label', 'Count']
+
+                # Create pie chart data with labels
+                df_pie = label_counts.copy()
+                
+                # Threshold for grouping small slices
+                threshold = 1  # Percentage threshold
+                total = df_pie['Count'].sum()
+                df_pie['Percentage'] = df_pie['Count'] / total * 100
+                df_pie['Code Label'] = np.where(
+                    df_pie['Percentage'] < threshold,
+                    'Other',
+                    df_pie['Code Label']
+                )
+                
+                # Group small categories
+                df_pie = df_pie.groupby('Code Label', as_index=False).agg({
+                    'Count': 'sum',
+                    'Percentage': 'sum'
                 })
 
-                threshold = 1  # Percentage threshold
-                df_pie['Code Name'] = np.where(
-                    df_pie['Count']/df_pie['Count'].sum() * 100 < threshold,
-                    'Other',
-                    df_pie['Code Name']
-                )
-                df_pie = df_pie.groupby('Code Name', as_index=False).sum()
-                
-                # Generate enhanced pie chart
+                # Create the visualization
                 fig = px.pie(
                     df_pie,
-                    names='Code Name',
+                    names='Code Label',
                     values='Count',
-                    hole=0.,
-                    title="Code Distribution",
+                    hole=0.3,
+                    title="Code Distribution by Label",
                     labels={'Count': 'Responses'},
-                    width=1000,  # Increased width
-                    height=800   # Increased height
+                    custom_data=['Percentage']
                 )
 
-                # Update layout for better label visibility
+                # Improve label formatting
+                fig.update_traces(
+                    hovertemplate="<b>%{label}</b><br>Count: %{value}<br>Percentage: %{customdata[0]:.1f}%",
+                    texttemplate='%{label}<br>(%{percent:.1%})',
+                    textposition='outside',
+                    insidetextorientation='auto'
+                )
+
                 fig.update_layout(
-                    uniformtext_minsize=12,  # Minimum font size
-                    uniformtext_mode='hide',  # Hide labels that don't fit
-                    margin=dict(t=50, b=50, l=20, r=20),
+                    uniformtext_minsize=12,
+                    uniformtext_mode='hide',
                     legend=dict(
                         orientation="h",
                         yanchor="bottom",
-                        y=-0.2,
+                        y=-0.3,
                         xanchor="center",
                         x=0.5
-                    )
+                    ),
+                    height=750
                 )
-                # Force show all labels with leader lines
-                fig.update_traces(
-                    textposition='outside',
-                    textinfo='percent+label',
-                    insidetextorientation='auto',
-                    pull=[0.02] * len(df_pie),  # Small pull for separation
-                    marker=dict(line=dict(color='#ffffff', width=2)))
-                
+
                 st.plotly_chart(fig, use_container_width=True)
                 st.markdown("#### Coded Responses Preview")
                 st.dataframe(df_coded.head(20), use_container_width=True, height=600)
@@ -774,173 +843,118 @@ if (st.session_state.verbatims is not None and
             col1, col2 = st.columns(2)
             
             with col1:
+                # Fixed Codeframe Export
                 st.markdown("#### Codeframe Export")
                 if selected_question in st.session_state.codeframes:
-                    output_cf_filename = f"codeframe_{selected_question}.xlsx"
-                    with pd.ExcelWriter(output_cf_filename, engine="xlsxwriter") as writer:
+                    try:
                         codeframe = st.session_state.codeframes[selected_question]
-                        codeframe_df = pd.DataFrame([{
-                            "Code Number": code,
-                            "Code Name": details.get("code_name", ""),
-                            "Description": details.get("Description", ""),
-                            "Keywords": ", ".join(details.get("keywords", []))
-                        } for code, details in codeframe.items()])
+                        
+                        # Create properly structured dataframe
+                        codeframe_data = []
+                        for code_num, details in codeframe.items():
+                            codeframe_data.append({
+                                "Code Number": code_num,
+                                "Code Name": details.get("Code Name", ""),
+                                "Description": details.get("Description", ""),
+                                "Keywords": ", ".join(details.get("Keywords", [])),
+                                "Sentiment": details.get("Sentiment", "Neutral")
+                            })
                         
                         # Add error code if present in data
                         if selected_question in st.session_state.coded_data:
                             df_coded = st.session_state.coded_data[selected_question]
-                            if 999 in df_coded['codes'].explode().unique():
-                                error_code = {
+                            if 999 in pd.Series([item for sublist in df_coded['codes'] for item in sublist]).unique():
+                                codeframe_data.append({
                                     "Code Number": 999,
                                     "Code Name": "Processing Error",
                                     "Description": "Failed to code this response",
-                                    "Keywords": ""
-                                }
-                                codeframe_df = pd.concat([codeframe_df, pd.DataFrame([error_code])])
+                                    "Keywords": "",
+                                    "Sentiment": "Neutral"
+                                })
                         
-                        header_info = pd.DataFrame({
-                            "Question Code": [selected_question],
-                            "Question Label": [question_dict.get(selected_question, "")]
-                        })
-                        header_info.to_excel(writer, sheet_name="Codeframe", index=False, startrow=0)
-                        codeframe_df.to_excel(writer, sheet_name="Codeframe", index=False, startrow=3)
-                    with open(output_cf_filename, "rb") as f:
-                        st.download_button(
-                            "💾 Download Codeframe",
-                            data=f,
-                            file_name=output_cf_filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-            
-                with col2:
-                    st.markdown("#### Full Dataset Export")
-                    if selected_question in st.session_state.coded_data:
-                        try:
-                            # Get original verbatims and coded data
-                            original_verbatims = st.session_state.verbatims.copy()
-                            coded_data = st.session_state.coded_data[selected_question].copy()
-                            
-                            # Ensure we maintain original structure
-                            final_export = original_verbatims.copy()
-                            
-                            # Add coding results as new columns
-                            final_export['Coding_Codes'] = coded_data['codes'].apply(
-                                lambda x: ', '.join(map(str, x)) if isinstance(x, list) else str(x)
+                        codeframe_df = pd.DataFrame(codeframe_data)
+                        
+                        # Create downloadable file
+                        output_cf_filename = f"codeframe_{selected_question}.xlsx"
+                        codeframe_df.to_excel(output_cf_filename, index=False)
+                        
+                        with open(output_cf_filename, "rb") as f:
+                            st.download_button(
+                                "💾 Download Codeframe",
+                                data=f,
+                                file_name=output_cf_filename,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                             )
-                            final_export['Coding_Confidence'] = coded_data['confidence']
-                            final_export['Coding_Reasoning'] = coded_data['reasoning']
+                    except Exception as e:
+                        st.error(f"Codeframe export error: {str(e)}")
+
+            with col2:
+                # Fixed Full Dataset Export
+                st.markdown("#### Full Dataset Export")
+                if selected_question in st.session_state.coded_data:
+                    try:
+                        # Get original data and coded results
+                        original_df = st.session_state.verbatims.copy()
+                        coded_df = st.session_state.coded_data[selected_question].copy()
+                        
+                        # Clean codes column
+                        coded_df['codes'] = coded_df['codes'].apply(
+                            lambda x: [c for c in x if isinstance(c, (int, float))]
+                        )
+                        
+                        # Merge with original data
+                        final_export = original_df.join(coded_df)
+                        
+                        # Add individual code columns
+                        def safe_get_codes(index):
+                            try:
+                                return coded_df.loc[index, 'codes']
+                            except KeyError:
+                                return []
                             
-                            # Add individual code columns (Code1-Code5)
-                            def expand_codes(row):
-                                codes = coded_data.at[row.name, 'codes'] if row.name in coded_data.index else []
-                                if pd.isna(codes):
-                                    codes = []
-                                elif not isinstance(codes, list):
-                                    codes = [codes]
-                                
-                                # Clean and format codes
-                                clean_codes = []
-                                for code in codes:
-                                    if pd.notna(code):
-                                        if isinstance(code, float) and code.is_integer():
-                                            clean_codes.append(str(int(code)))
-                                        else:
-                                            clean_codes.append(str(code))
-                                
-                                # Pad to 5 columns
-                                return pd.Series(
-                                    clean_codes[:5] + [''] * (5 - len(clean_codes[:5])),
-                                    index=[f'Code{i+1}' for i in range(5)]
-                                )
+                        max_codes = coded_df['codes'].apply(len).max()
+                        code_cols = pd.DataFrame(
+                            coded_df['codes'].tolist(),
+                            columns=[f'Code_{i+1}' for i in range(max_codes)]
+                        )
+                        
+                        final_export = pd.concat([final_export, code_cols], axis=1)
+                        
+                        # Generate filename
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        output_filename = f"Coded_{selected_question}_{timestamp}.xlsx"
+                        
+                        # Create Excel file
+                        with pd.ExcelWriter(output_filename, engine='xlsxwriter') as writer:
+                            # Main data
+                            final_export.to_excel(
+                                writer,
+                                sheet_name='Coded Responses',
+                                index=False
+                            )
                             
-                            # Add code columns directly to final export
-                            code_columns = final_export.apply(expand_codes, axis=1)
-                            final_export = pd.concat([final_export, code_columns], axis=1)
-                            
-                            # Verify all original columns are present
-                            original_columns = set(st.session_state.verbatims.columns)
-                            current_columns = set(final_export.columns)
-                            missing_columns = original_columns - current_columns
-                            if missing_columns:
-                                raise ValueError(f"Missing columns in export: {', '.join(missing_columns)}")
-                            
-                            # Generate filename
-                            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                            output_filename = f"Coded_{selected_question}_{timestamp}.xlsx"
-                            
-                            # Create Excel file
-                            with pd.ExcelWriter(output_filename, engine='xlsxwriter') as writer:
-                                # Write main data
-                                final_export.to_excel(
-                                    writer,
-                                    sheet_name='Coded Responses',
-                                    index=False
-                                )
-                                
-                                # Create codeframe documentation
-                                codeframe_sheet = writer.book.add_worksheet('Codeframe')
-                                
-                                # Write header information
-                                codeframe_sheet.write(0, 0, 'Question Code')
-                                codeframe_sheet.write(0, 1, selected_question)
-                                codeframe_sheet.write(1, 0, 'Question Label')
-                                codeframe_sheet.write(1, 1, question_dict.get(selected_question, ''))
-                                
-                                # Write codeframe data
-                                codeframe_data = []
-                                for code_num, details in st.session_state.codeframes.get(selected_question, {}).items():
-                                    codeframe_data.append({
-                                        'Code Number': code_num,
-                                        'Code Name': details.get('code_name', ''),
-                                        'Description': details.get('Description', ''),
-                                        'Keywords': ', '.join(details.get('keywords', []))
-                                    })
-                                
-                                # Add error code if present
-                                if 999 in coded_data['codes'].explode().unique():
-                                    codeframe_data.append({
-                                        'Code Number': 999,
-                                        'Code Name': 'Processing Error',
-                                        'Description': 'Failed to code this response',
-                                        'Keywords': ''
-                                    })
-                                
-                                # Convert to DataFrame and write
-                                if codeframe_data:
-                                    pd.DataFrame(codeframe_data).to_excel(
-                                        writer,
-                                        sheet_name='Codeframe',
-                                        startrow=3,
-                                        index=False
-                                    )
-                            
-                            # Create download button
-                            with open(output_filename, 'rb') as f:
-                                st.download_button(
-                                    label='📥 Download Full Dataset',
-                                    data=f,
-                                    file_name=output_filename,
-                                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                    help='Includes all original columns plus coding results'
-                                )
-                            
-                            # Clean up temporary file
-                            os.remove(output_filename)
-                            
-                        except Exception as e:
-                            st.error(f'Export failed: {str(e)}')
-                            st.error('Please ensure the data structure matches expectations')
-                            
-                            # Debug information
-                            with st.expander('Show Debug Details'):
-                                st.write('### Original Verbatims Columns')
-                                st.write(list(st.session_state.verbatims.columns))
-                                
-                                st.write('### Processed Export Columns')
-                                if 'final_export' in locals():
-                                    st.write(list(final_export.columns))
-                                else:
-                                    st.write('Export not initialized')
+                            # Codeframe documentation
+                            codeframe_df.to_excel(
+                                writer,
+                                sheet_name='Codeframe',
+                                index=False
+                            )
+                        
+                        # Create download button
+                        with open(output_filename, 'rb') as f:
+                            st.download_button(
+                                label='📥 Download Full Dataset(Codeframe+Coded Responses)',
+                                data=f,
+                                file_name=output_filename,
+                                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                            )
+                        
+                        # Cleanup temporary file
+                        os.remove(output_filename)
+                        
+                    except Exception as e:
+                        st.error(f'Export failed: {str(e)}')
+                        st.error('Please ensure data consistency between original and coded datasets')
 
 # Footer
 st.markdown("---")
